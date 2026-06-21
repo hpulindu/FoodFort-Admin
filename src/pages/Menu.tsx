@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Plus,
   Pencil,
@@ -14,11 +14,13 @@ import { PageHeader } from "../components/PageHeader";
 import { Badge, Button, Card, EmptyState, Field, Input, Select, Spinner, Textarea, Toggle } from "../components/ui";
 import { Modal } from "../components/overlays";
 import { useMenuSections, useSauces } from "../lib/data";
-import type { MenuItem, MenuSection, Sauce } from "../lib/types";
+import type { MenuItem, MenuItemVariant, MenuSection, Sauce } from "../lib/types";
 import {
   adminDeleteMenuItem,
   adminDeleteMenuSection,
   adminDeleteSauce,
+  adminMoveMenuItem,
+  adminReorderMenuItems,
   adminReorderSections,
   adminSetItemAvailability,
   adminSetSauceAvailability,
@@ -38,6 +40,10 @@ function genId(prefix: string) {
   return `${prefix}-${rnd}`;
 }
 
+function itemRefKey(item: MenuItem): string {
+  return item.id ?? item.name;
+}
+
 // ── Section editor ─────────────────────────────────────────────────────────────
 function SectionModal({
   section,
@@ -52,6 +58,13 @@ function SectionModal({
   const [title, setTitle] = useState(section?.title ?? "");
   const [subtitle, setSubtitle] = useState(section?.subtitle ?? "");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setNumber(section?.number ?? "");
+    setTitle(section?.title ?? "");
+    setSubtitle(section?.subtitle ?? "");
+  }, [open, section]);
 
   async function save() {
     if (!title.trim()) {
@@ -113,11 +126,13 @@ function SectionModal({
 
 // ── Item editor ────────────────────────────────────────────────────────────────
 function ItemModal({
+  sections,
   sectionId,
   item,
   open,
   onClose,
 }: {
+  sections: MenuSection[];
   sectionId: string;
   item: MenuItem | null;
   open: boolean;
@@ -128,6 +143,10 @@ function ItemModal({
   const [price, setPrice] = useState(item?.price != null ? String(item.price) : "");
   const [badge, setBadge] = useState<"chef" | "veg" | "">(item?.badge ?? "");
   const [image, setImage] = useState<string | null>(item?.image ?? null);
+  const [categoryId, setCategoryId] = useState(sectionId);
+  const [variants, setVariants] = useState<MenuItemVariant[]>([]);
+  const [sauceSelectionEnabled, setSauceSelectionEnabled] = useState(false);
+  const [maxSauces, setMaxSauces] = useState("2");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -136,6 +155,33 @@ function ItemModal({
     (item?.name
       ? `item-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`
       : genId("item"));
+
+  useEffect(() => {
+    if (!open) return;
+    setName(item?.name ?? "");
+    setDescription(item?.description ?? "");
+    setPrice(item?.price != null ? String(item.price) : "");
+    setBadge(item?.badge ?? "");
+    setImage(item?.image ?? null);
+    setCategoryId(sectionId);
+    setVariants(item?.variants ?? []);
+    setSauceSelectionEnabled(item?.sauceSelection?.enabled ?? false);
+    setMaxSauces(String(item?.sauceSelection?.maxSauces ?? 2));
+  }, [open, item, sectionId]);
+
+  function addVariant() {
+    setVariants((current) => [...current, { id: genId("variant"), name: "", price: 0 }]);
+  }
+
+  function updateVariant(index: number, patch: Partial<MenuItemVariant>) {
+    setVariants((current) =>
+      current.map((variant, i) => (i === index ? { ...variant, ...patch } : variant)),
+    );
+  }
+
+  function removeVariant(index: number) {
+    setVariants((current) => current.filter((_, i) => i !== index));
+  }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -163,19 +209,46 @@ function ItemModal({
       toast.error("Enter a valid price");
       return;
     }
+    const cleanedVariants = variants
+      .map((variant) => ({
+        id: variant.id ?? genId("variant"),
+        name: variant.name.trim(),
+        price: Number(variant.price),
+      }))
+      .filter((variant) => variant.name && Number.isFinite(variant.price) && variant.price >= 0);
+    if (variants.length > 0 && cleanedVariants.length === 0) {
+      toast.error("Add at least one valid variant or remove all variant rows");
+      return;
+    }
+    const maxSaucesNum = Number(maxSauces);
+    if (sauceSelectionEnabled && (!Number.isInteger(maxSaucesNum) || maxSaucesNum < 1 || maxSaucesNum > 10)) {
+      toast.error("Max sauces must be between 1 and 10");
+      return;
+    }
     setSaving(true);
     try {
-      await adminUpsertMenuItem({
-        sectionId,
-        item: {
-          id: itemId,
-          name: name.trim(),
-          description: description.trim() || null,
-          price: priceNum,
-          badge: badge || null,
-          image: image || null,
-        },
-      });
+      const payload = {
+        id: itemId,
+        name: name.trim(),
+        description: description.trim() || null,
+        price: priceNum,
+        badge: badge || null,
+        image: image || null,
+        variants: cleanedVariants.length ? cleanedVariants : undefined,
+        sauceSelection: sauceSelectionEnabled
+          ? { enabled: true, maxSauces: maxSaucesNum }
+          : undefined,
+      };
+
+      if (item && categoryId !== sectionId) {
+        await adminMoveMenuItem({
+          fromSectionId: sectionId,
+          toSectionId: categoryId,
+          itemId: item.id ?? item.name,
+        });
+      }
+
+      await adminUpsertMenuItem({ sectionId: categoryId, item: payload });
       toast.success(item ? "Item updated" : "Item added");
       onClose();
     } catch (err) {
@@ -244,6 +317,17 @@ function ItemModal({
           </div>
         </div>
 
+        <Field label="Category">
+          <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            {sections.map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.number ? `${section.number}. ` : ""}
+                {section.title}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
         <Field label="Name">
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -255,7 +339,7 @@ function ItemModal({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Price (AUD)">
+          <Field label={variants.length ? "Base price (AUD)" : "Price (AUD)"}>
             <Input
               type="number"
               step="0.01"
@@ -271,6 +355,75 @@ function ItemModal({
               <option value="veg">Vegetarian</option>
             </Select>
           </Field>
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-[var(--color-border)] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">Size / variants</p>
+              <p className="text-xs text-[var(--color-muted)]">
+                Optional sizes or options with their own prices.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" type="button" onClick={addVariant}>
+              <Plus className="h-4 w-4" />
+              Add
+            </Button>
+          </div>
+          {variants.length === 0 ? (
+            <p className="text-xs text-[var(--color-muted)]">No variants — uses base price only.</p>
+          ) : (
+            <div className="space-y-2">
+              {variants.map((variant, index) => (
+                <div key={variant.id ?? index} className="grid grid-cols-[1fr_120px_auto] gap-2">
+                  <Input
+                    placeholder="e.g. Small"
+                    value={variant.name}
+                    onChange={(e) => updateVariant(index, { name: e.target.value })}
+                  />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Price"
+                    value={variant.price === 0 ? "" : String(variant.price)}
+                    onChange={(e) =>
+                      updateVariant(index, { price: e.target.value === "" ? 0 : Number(e.target.value) })
+                    }
+                  />
+                  <Button size="icon" variant="ghost" type="button" onClick={() => removeVariant(index)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-[var(--color-border)] p-3">
+          <label className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Sauce selection</p>
+              <p className="text-xs text-[var(--color-muted)]">
+                Let customers pick sauces when ordering this item.
+              </p>
+            </div>
+            <Toggle
+              checked={sauceSelectionEnabled}
+              onChange={setSauceSelectionEnabled}
+            />
+          </label>
+          {sauceSelectionEnabled && (
+            <Field label="Maximum sauces">
+              <Input
+                type="number"
+                min="1"
+                max="10"
+                value={maxSauces}
+                onChange={(e) => setMaxSauces(e.target.value)}
+              />
+            </Field>
+          )}
         </div>
       </div>
     </Modal>
@@ -290,6 +443,12 @@ function SauceModal({
   const [name, setName] = useState(sauce?.name ?? "");
   const [price, setPrice] = useState(sauce?.price != null ? String(sauce.price) : "");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(sauce?.name ?? "");
+    setPrice(sauce?.price != null ? String(sauce.price) : "");
+  }, [open, sauce]);
 
   async function save() {
     const priceNum = Number(price);
@@ -377,11 +536,30 @@ export function MenuPage() {
     const target = index + dir;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
-    setBusyId("reorder");
+    setBusyId("reorder-sections");
     try {
       await adminReorderSections({ order: next.map((s) => s.id) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to reorder");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function moveItem(section: MenuSection, index: number, dir: -1 | 1) {
+    const items = [...(section.items ?? [])];
+    const target = index + dir;
+    if (target < 0 || target >= items.length) return;
+    [items[index], items[target]] = [items[target], items[index]];
+    const busyKey = `reorder-items:${section.id}`;
+    setBusyId(busyKey);
+    try {
+      await adminReorderMenuItems({
+        sectionId: section.id,
+        order: items.map(itemRefKey),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reorder items");
     } finally {
       setBusyId(null);
     }
@@ -471,14 +649,14 @@ export function MenuPage() {
                 <div className="flex items-center gap-2">
                   <div className="flex flex-col">
                     <button
-                      disabled={index === 0 || busyId === "reorder"}
+                      disabled={index === 0 || busyId === "reorder-sections"}
                       onClick={() => moveSection(index, -1)}
                       className="text-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-30"
                     >
                       <ChevronUp className="h-4 w-4" />
                     </button>
                     <button
-                      disabled={index === sections.length - 1 || busyId === "reorder"}
+                      disabled={index === sections.length - 1 || busyId === "reorder-sections"}
                       onClick={() => moveSection(index, 1)}
                       className="text-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-30"
                     >
@@ -512,8 +690,25 @@ export function MenuPage() {
               <ul className="divide-y divide-[var(--color-border)]">
                 {(section.items ?? []).map((item, i) => {
                   const available = section.availability?.[item.name] !== false;
+                  const itemBusy = busyId === `reorder-items:${section.id}`;
                   return (
                     <li key={item.id ?? `${item.name}-${i}`} className="flex items-center gap-3 p-3">
+                      <div className="flex flex-col">
+                        <button
+                          disabled={i === 0 || itemBusy}
+                          onClick={() => moveItem(section, i, -1)}
+                          className="text-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-30"
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          disabled={i === (section.items?.length ?? 0) - 1 || itemBusy}
+                          onClick={() => moveItem(section, i, 1)}
+                          className="text-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-30"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                      </div>
                       {item.image ? (
                         <img
                           src={item.image}
@@ -530,6 +725,12 @@ export function MenuPage() {
                           <p className="truncate text-sm font-medium">{item.name}</p>
                           {item.badge && (
                             <Badge tone="gold">{item.badge === "chef" ? "Chef" : "Veg"}</Badge>
+                          )}
+                          {(item.variants?.length ?? 0) > 0 && (
+                            <Badge tone="info">{item.variants!.length} variants</Badge>
+                          )}
+                          {item.sauceSelection?.enabled && (
+                            <Badge tone="neutral">Sauces · max {item.sauceSelection.maxSauces}</Badge>
                           )}
                           {!available && <Badge tone="danger">Sold out</Badge>}
                         </div>
@@ -628,6 +829,7 @@ export function MenuPage() {
       />
       {itemModal.open && (
         <ItemModal
+          sections={sections}
           sectionId={itemModal.sectionId}
           item={itemModal.item}
           open={itemModal.open}

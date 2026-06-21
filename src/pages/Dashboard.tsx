@@ -5,24 +5,18 @@ import {
   DollarSign,
   ShoppingBag,
   TrendingUp,
-  PauseCircle,
-  PlayCircle,
   ChevronRight,
   Store,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Badge, Button, Card, Spinner } from "../components/ui";
-import { Modal } from "../components/overlays";
 import { OrderDetailDrawer } from "../components/OrderDetailDrawer";
 import { useOperationHours, useOrderingStatus, useTodayOrders } from "../lib/data";
 import { computeRevenue } from "../lib/revenue";
 import { isStoreOpen } from "../lib/hours";
-import { adminSetOrderingPaused } from "../lib/admin-api";
 import { formatCurrency, formatPerthTime } from "../lib/utils";
 import { formatOrderNumber, statusTone } from "../lib/order-helpers";
 import type { Order } from "../lib/types";
-import { Textarea } from "../components/ui";
-import { toast } from "sonner";
 
 function StatCard({
   icon,
@@ -54,9 +48,6 @@ export function DashboardPage() {
   const { data: ordering } = useOrderingStatus();
   const { data: hours } = useOperationHours();
   const [selected, setSelected] = useState<Order | null>(null);
-  const [pauseModal, setPauseModal] = useState(false);
-  const [reason, setReason] = useState("");
-  const [savingPause, setSavingPause] = useState(false);
 
   const summary = useMemo(() => computeRevenue(orders), [orders]);
   const activeOrders = useMemo(
@@ -66,51 +57,9 @@ export function DashboardPage() {
   const open = isStoreOpen(hours);
   const selectedLive = selected ? orders.find((o) => o.id === selected.id) ?? selected : null;
 
-  async function pauseNow() {
-    setSavingPause(true);
-    try {
-      await adminSetOrderingPaused({ paused: true, reason: reason.trim() || undefined });
-      toast.success("Online ordering paused");
-      setPauseModal(false);
-      setReason("");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to pause");
-    } finally {
-      setSavingPause(false);
-    }
-  }
-
-  async function resumeNow() {
-    setSavingPause(true);
-    try {
-      await adminSetOrderingPaused({ paused: false });
-      toast.success("Online ordering resumed");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to resume");
-    } finally {
-      setSavingPause(false);
-    }
-  }
-
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        description="Today at a glance, Perth time."
-        actions={
-          ordering.paused ? (
-            <Button variant="primary" size="sm" loading={savingPause} onClick={resumeNow}>
-              <PlayCircle className="h-4 w-4" />
-              Resume ordering
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => setPauseModal(true)}>
-              <PauseCircle className="h-4 w-4" />
-              Pause ordering
-            </Button>
-          )
-        }
-      />
+      <PageHeader title="Dashboard" description="Today at a glance, Perth time." />
 
       {/* Status banner */}
       <Card className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -274,33 +223,6 @@ export function DashboardPage() {
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
       />
-
-      <Modal
-        open={pauseModal}
-        onClose={() => setPauseModal(false)}
-        title="Pause online ordering"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPauseModal(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" loading={savingPause} onClick={pauseNow}>
-              Pause ordering
-            </Button>
-          </div>
-        }
-      >
-        <p className="mb-3 text-sm text-[var(--color-muted)]">
-          Customers will be blocked from checking out until you resume. Add an optional
-          reason shown to customers.
-        </p>
-        <Textarea
-          rows={3}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. Kitchen at capacity — back in 30 minutes"
-        />
-      </Modal>
     </>
   );
 }

@@ -57,6 +57,16 @@ export const adminDeleteMenuItem = callable<
   { ok: true }
 >("adminDeleteMenuItem");
 
+export const adminReorderMenuItems = callable<
+  { sectionId: string; order: string[] },
+  { ok: true }
+>("adminReorderMenuItems");
+
+export const adminMoveMenuItem = callable<
+  { fromSectionId: string; toSectionId: string; itemId: string },
+  { ok: true }
+>("adminMoveMenuItem");
+
 export const adminSetItemAvailability = callable<
   { sectionId: string; itemName: string; available: boolean },
   { ok: true }

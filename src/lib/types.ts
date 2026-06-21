@@ -71,6 +71,17 @@ export type Order = {
   refundedBy?: string | null;
 };
 
+export type MenuItemVariant = {
+  id?: string;
+  name: string;
+  price: number;
+};
+
+export type MenuItemSauceSelection = {
+  enabled: boolean;
+  maxSauces: number;
+};
+
 export type MenuItem = {
   id?: string;
   name: string;
@@ -78,6 +89,8 @@ export type MenuItem = {
   price: number;
   badge?: "chef" | "veg" | null;
   image?: string | null;
+  variants?: MenuItemVariant[];
+  sauceSelection?: MenuItemSauceSelection;
 };
 
 export type MenuSection = {
