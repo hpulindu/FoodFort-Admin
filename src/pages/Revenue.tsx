@@ -112,7 +112,7 @@ export function RevenuePage() {
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Metric
-              label="Owner revenue"
+              label="Revenue"
               value={formatCurrency(summary.ownerRevenue)}
               hint="Subtotal − refunds (excl. service fee)"
             />
@@ -132,19 +132,9 @@ export function RevenuePage() {
               hint={`Subtotal eq. ${formatCurrency(summary.refundedSubtotalEquivalent)}`}
             />
             <Metric
-              label="Service fee"
-              value={formatCurrency(summary.serviceFeeTotal)}
-              hint="Skryptone application fee"
-            />
-            <Metric
-              label="Card processing"
+              label="Card processing fee"
               value={formatCurrency(summary.cardProcessingFeeTotal)}
               hint="Passed to customer"
-            />
-            <Metric label="Subtotal" value={formatCurrency(summary.subtotalTotal)} />
-            <Metric
-              label="Net of card fees"
-              value={formatCurrency(summary.grossCustomerPaid - summary.cardProcessingFeeTotal)}
             />
           </div>
 

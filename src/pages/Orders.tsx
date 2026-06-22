@@ -3,7 +3,7 @@ import { Bell, BellOff, ClipboardList, Phone } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Badge, Button, EmptyState, Select, Spinner } from "../components/ui";
 import { OrderDetailDrawer } from "../components/OrderDetailDrawer";
-import { useOrdersByDay } from "../lib/data";
+import { useOrders } from "../lib/data";
 import type { Order, OrderStatus, OrderType } from "../lib/types";
 import { ORDER_STATUSES } from "../lib/types";
 import { formatCurrency, formatPerthTime, getPerthDateKey } from "../lib/utils";
@@ -33,7 +33,15 @@ function useNewOrderNotifier(orders: Order[], enabled: boolean) {
   }, [orders, enabled]);
 }
 
-function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
+function OrderCard({
+  order,
+  onOpen,
+  showDate,
+}: {
+  order: Order;
+  onOpen: () => void;
+  showDate?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const created = order.createdAt?.toDate?.();
 
@@ -72,7 +80,10 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
         <div className="text-right">
           <p className="font-semibold">{formatCurrency(order.total)}</p>
           {created && (
-            <p className="text-xs text-[var(--color-muted)]">{formatPerthTime(created)}</p>
+            <p className="text-xs text-[var(--color-muted)]">
+              {showDate && order.orderDay ? `${order.orderDay} · ` : ""}
+              {formatPerthTime(created)}
+            </p>
           )}
         </div>
       </div>
@@ -110,14 +121,16 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
 }
 
 export function OrdersPage() {
-  const [dateKey, setDateKey] = useState(getPerthDateKey());
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | "all" | "active">("active");
+  const [dateKey, setDateKey] = useState("");
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | "all" | "active">("all");
   const [typeFilter, setTypeFilter] = useState<OrderType | "all">("all");
   const [selected, setSelected] = useState<Order | null>(null);
   const [notify, setNotify] = useState(false);
 
-  const { data: orders, loading } = useOrdersByDay(dateKey);
+  const { data: orders, loading } = useOrders({ dateKey: dateKey || undefined });
   useNewOrderNotifier(orders, notify);
+
+  const hasFilters = Boolean(dateKey) || statusFilter !== "all" || typeFilter !== "all";
 
   // Keep the open drawer's order in sync with live updates.
   const selectedLive = selected ? orders.find((o) => o.id === selected.id) ?? selected : null;
@@ -158,7 +171,7 @@ export function OrdersPage() {
     <>
       <PageHeader
         title="Orders"
-        description="Live order board. Updates in real time."
+        description="All orders in real time. Filter by day, status, or type."
         actions={
           <Button variant={notify ? "primary" : "outline"} size="sm" onClick={toggleNotify}>
             {notify ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
@@ -167,21 +180,39 @@ export function OrdersPage() {
         }
       />
 
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <Select value={dateKey} onChange={(e) => setDateKey(e.target.value)} className="hidden" />
-        <input
-          type="date"
-          value={dateKey}
-          max={getPerthDateKey()}
-          onChange={(e) => setDateKey(e.target.value)}
-          className="h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm text-[var(--color-fg)] focus:border-[var(--color-gold)] focus:outline-none"
-        />
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="col-span-2 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={!dateKey ? "primary" : "outline"}
+            onClick={() => setDateKey("")}
+          >
+            All dates
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={dateKey === getPerthDateKey() ? "primary" : "outline"}
+            onClick={() => setDateKey(getPerthDateKey())}
+          >
+            Today
+          </Button>
+          <input
+            type="date"
+            value={dateKey}
+            max={getPerthDateKey()}
+            onChange={(e) => setDateKey(e.target.value)}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm text-[var(--color-fg)] focus:border-[var(--color-gold)] focus:outline-none sm:max-w-[11rem]"
+            aria-label="Filter by day"
+          />
+        </div>
         <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as OrderStatus | "all" | "active")}
         >
-          <option value="active">Active</option>
           <option value="all">All statuses</option>
+          <option value="active">Active only</option>
           {ORDER_STATUSES.map((s) => (
             <option key={s} value={s} className="capitalize">
               {s}
@@ -206,12 +237,21 @@ export function OrdersPage() {
         <EmptyState
           icon={<ClipboardList className="h-8 w-8" />}
           title="No orders"
-          description="No orders match the current filters for this day."
+          description={
+            hasFilters
+              ? "No orders match the current filters."
+              : "No orders have been placed yet."
+          }
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {filtered.map((o) => (
-            <OrderCard key={o.id} order={o} onOpen={() => setSelected(o)} />
+            <OrderCard
+              key={o.id}
+              order={o}
+              showDate={!dateKey}
+              onOpen={() => setSelected(o)}
+            />
           ))}
         </div>
       )}

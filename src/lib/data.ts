@@ -73,6 +73,38 @@ export function useOrdersByDay(dateKey?: string): AsyncData<Order[]> {
   return state;
 }
 
+/** Live orders across all days, newest first (optional day filter in the UI). */
+export function useOrders(options?: { dateKey?: string; limit?: number }): AsyncData<Order[]> {
+  const dateKey = options?.dateKey?.trim() || undefined;
+  const limit = options?.limit ?? 500;
+  const [state, setState] = useState<AsyncData<Order[]>>({
+    data: [],
+    loading: true,
+    error: null,
+  });
+
+  useEffect(() => {
+    setState((s) => ({ ...s, loading: true }));
+    const q = dateKey
+      ? query(collection(db, "orders"), where("orderDay", "==", dateKey))
+      : query(collection(db, "orders"), orderBy("createdAt", "desc"), fbLimit(limit));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const orders = snap.docs.map(mapOrder);
+        if (dateKey) {
+          orders.sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+        }
+        setState({ data: orders, loading: false, error: null });
+      },
+      (err) => setState({ data: [], loading: false, error: err.message }),
+    );
+    return unsub;
+  }, [dateKey, limit]);
+
+  return state;
+}
+
 /** Live orders across an inclusive Perth-day range (YYYY-MM-DD keys). */
 export function useOrdersByRange(startKey: string, endKey: string): AsyncData<Order[]> {
   const [state, setState] = useState<AsyncData<Order[]>>({
